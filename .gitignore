@@ -1,0 +1,20 @@
+# Build output
+dist/
+build/
+*.spec.bak
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Logs
+yallapips.log
+*.log
+
+# Don't commit personal settings
+# config.json is included as a template — keep it in repo
+
+# IDE
+.vscode/
+.idea/
