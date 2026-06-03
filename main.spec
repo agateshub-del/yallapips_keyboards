@@ -6,11 +6,11 @@ a = Analysis(
     ['main.py'],
     pathex=[SPECPATH],
     binaries=[],
-    datas=[
-        ('config.json', '.'),
-        ('src', 'src'),
-    ],
-    hiddenimports=[
+datas=[
+    (os.path.join(SPECPATH, 'config.json'), '.'),
+    (os.path.join(SPECPATH, 'src'), 'src'),
+],
+hiddenimports=[
         'MetaTrader5',
         'PIL', 'PIL.Image', 'PIL.ImageDraw', 'PIL.ImageFont',
         'pystray', 'pystray._win32',
