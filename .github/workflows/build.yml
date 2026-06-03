@@ -1,3 +1,8 @@
+- name: Install HID dependencies
+      run: |
+        pip install hidapi hid
+        python -c "import hid; print('HID OK:', hid.__file__)"
+      shell: cmd
 name: Build YallaPips Keyboard EXE
 
 on:
