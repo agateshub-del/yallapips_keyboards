@@ -11,9 +11,25 @@ Supports:
 import threading
 import time
 import struct
+import io
+import os
+import sys
+import logging
+
+# ── Fix DLL search path on Windows before importing hid ──────────
+if sys.platform == 'win32':
+    import importlib.util
+    _spec = importlib.util.find_spec('hid')
+    if _spec:
+        _hid_dir = os.path.dirname(_spec.origin)
+        os.add_dll_directory(_hid_dir)
+    if getattr(sys, 'frozen', False):
+        # Running as PyInstaller exe — also check exe folder
+        os.add_dll_directory(os.path.dirname(sys.executable))
+
 import hid
 from PIL import Image
-from src.logger import Logger
+Logger = logging.getLogger("yp")
 
 # ── Known device profiles ──────────────────────────────────────────
 DEVICES = [
