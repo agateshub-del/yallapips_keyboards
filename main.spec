@@ -1,37 +1,28 @@
-# -*- mode: python ; coding: utf-8 -*-
-import os
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
+import os, glob, sys
 
 block_cipher = None
 
-# Auto-collect hidapi DLL and data files
-hid_datas    = collect_data_files('hid')
-hid_binaries = collect_dynamic_libs('hid')
+hid_dll = glob.glob(os.path.join(sys.prefix, '**', 'hidapi.dll'), recursive=True)
+hid_bins = [(dll, '.') for dll in hid_dll]
 
 a = Analysis(
     ['main.py'],
     pathex=[SPECPATH],
-    binaries=hid_binaries,
-    datas=hid_datas + [
+    binaries=hid_bins,
+    datas=[
         (os.path.join(SPECPATH, 'config.json'), '.'),
         (os.path.join(SPECPATH, 'src'), 'src'),
     ],
     hiddenimports=[
-        'numpy',
-        'numpy.core',
-        'numpy.core.multiarray',
+        'numpy', 'numpy.core', 'numpy.core.multiarray',
         'numpy.core._multiarray_umath',
         'MetaTrader5',
         'PIL', 'PIL.Image', 'PIL.ImageDraw', 'PIL.ImageFont',
         'pystray', 'pystray._win32',
         'hid',
-        'src.hardware',
-        'src.keyboard',
-        'src.key_renderer',
-        'src.mt5_bridge',
-        'src.config',
-        'src.gui',
-        'src.logger',
+        'src.hardware', 'src.keyboard', 'src.key_renderer',
+        'src.mt5_bridge', 'src.config', 'src.gui', 'src.logger',
     ],
     hookspath=[],
     runtime_hooks=[],
@@ -42,15 +33,8 @@ a = Analysis(
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
+    pyz, a.scripts, a.binaries, a.zipfiles, a.datas,
     name='YallaPips_Keyboard',
-    debug=False,
-    strip=False,
-    upx=True,
-    console=False,
-    icon=None,
+    debug=False, strip=False, upx=True,
+    console=False, icon=None,
 )
