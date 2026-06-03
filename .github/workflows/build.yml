@@ -20,24 +20,28 @@ jobs:
           cache: "pip"
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install MetaTrader5 numpy Pillow hidapi hid pystray pyinstaller
+        run: pip install MetaTrader5 numpy Pillow hid pystray pyinstaller
 
-      - name: Check HID
+      - name: Download and fix hidapi DLL
+        shell: pwsh
         run: |
+          $hidDir = python -c "import os, importlib.util; print(os.path.dirname(importlib.util.find_spec('hid').origin))"
+          Write-Host "HID dir: $hidDir"
+          Invoke-WebRequest -Uri "https://github.com/libusb/hidapi/releases/download/hidapi-0.14.0/hidapi-win.zip" -OutFile "hidapi-win.zip"
+          Expand-Archive -Path "hidapi-win.zip" -DestinationPath "hidapi-win"
+          Copy-Item -Force "hidapi-win\x64\hidapi.dll" "$hidDir\"
+          Write-Host "DLL copied to $hidDir"
           python -c "import hid; print('HID OK:', hid.__file__)"
 
       - name: Build EXE
-        run: |
-          pyinstaller main.spec
+        run: pyinstaller main.spec
 
       - name: Verify build
         shell: pwsh
         run: |
           if (Test-Path "dist/YallaPips_Keyboard.exe") {
             $size = (Get-Item "dist/YallaPips_Keyboard.exe").Length / 1MB
-            Write-Host "EXE built successfully - $([math]::Round($size,1)) MB"
+            Write-Host "EXE built - $([math]::Round($size,1)) MB"
           } else {
             Write-Error "EXE not found"
             exit 1
