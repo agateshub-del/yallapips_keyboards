@@ -34,20 +34,27 @@ def _build_image_payload(key_index, img_data, page_hdr):
     while remaining:
         chunk = remaining[:payload_size]
         remaining = remaining[payload_size:]
-        is_last = len(remaining) == 0
+        is_last = 1 if len(remaining) == 0 else 0
         if page_hdr == 8:
-            header = struct.pack("<BBBHBB", 0x02, 0x07, key_index,
-                                 is_last, len(chunk) & 0xFF, (len(chunk) >> 8) & 0xFF)
-            header += struct.pack("<H", page_num)
+            # Correct 8-byte header: B+B+B+B+H+H = 1+1+1+1+2+2 = 8 bytes
+            header = struct.pack("<BBBBHH",
+                                 0x02,          # report type
+                                 0x07,          # image data command
+                                 key_index,     # key index
+                                 is_last,       # last page flag
+                                 len(chunk),    # payload length
+                                 page_num)      # page number
         else:
-            header = struct.pack("<BBHBB", 0x02, 0x01, len(chunk), is_last, key_index + 1)
+            header = struct.pack("<BBHBB",
+                                 0x02, 0x01, len(chunk), is_last, key_index + 1)
             header += b'\x00' * (16 - len(header))
         padded = bytearray(header) + bytearray(chunk)
-        padded += bytearray(PAGE_SIZE - len(padded))
-        pages.append(bytes(padded))
+        # Only pad if we have room
+        if len(padded) < PAGE_SIZE:
+            padded += bytearray(PAGE_SIZE - len(padded))
+        pages.append(bytes(padded[:PAGE_SIZE]))
         page_num += 1
     return pages
-
 
 class StreamDockDevice:
     def __init__(self, profile):
@@ -137,13 +144,24 @@ class StreamDockDevice:
             self.clear_key(i)
 
     def _write(self, data):
-        if not self._device:
-            return
-        try:
+    if not self._device:
+        return
+    try:
+        out_reports = self._device.find_output_reports()
+        if out_reports:
+            report = out_reports[0]
+            raw = report.get_raw_data()
+            report_size = len(raw)
+            # Fit data to device's actual report size
+            payload = list(data[:report_size])
+            while len(payload) < report_size:
+                payload.append(0)
+            report.set_raw_data(payload)
+            report.send()
+        else:
             self._device.send_output_report(list(data[:PAGE_SIZE]))
-        except Exception as e:
-            Logger.error(f"Write error: {e}")
-
+    except Exception as e:
+        Logger.error(f"Write error: {e}")
 
 def find_device(custom_vid=None, custom_pid=None):
     candidates = list(DEVICES)
