@@ -30,7 +30,7 @@ KEY_REVERSE = {v - 1: k for k, v in enumerate(KEY_REMAP)}
 
 DEVICES = [
     {"name": "StreamDock MiraBox", "vid": 0x6603, "pid": 0x1014,
-     "keys": 15, "img_size": 96, "img_flip_h": False, "img_flip_v": False},
+     "keys": 15, "img_size": 96, "img_flip_h": False, "img_flip_v": True},
     {"name": "StreamDeck v2",      "vid": 0x0fd9, "pid": 0x006d,
      "keys": 15, "img_size": 72, "img_flip_h": True,  "img_flip_v": True},
     {"name": "StreamDeck v1",      "vid": 0x0fd9, "pid": 0x0060,
@@ -120,20 +120,24 @@ class StreamDockDevice:
         self._cb = cb
 
     def _on_data(self, data):
-        """Translate raw device key index → logical index → callback."""
-        for raw_i in range(self._profile["keys"]):
-            idx = 4 + raw_i
-            if idx >= len(data): break
-            pressed = bool(data[idx])
-            if pressed != self._prev[raw_i]:
-                self._prev[raw_i] = pressed
-                if self._cb:
-                    # Remap raw device key → logical action index
-                    logical = KEY_REVERSE.get(raw_i, raw_i)
-                    try:
-                        self._cb(logical, pressed)
-                    except Exception as e:
-                        Logger.error(f"Callback error: {e}")
+    # Log first press for debugging key byte layout
+    if any(data[4:20]):
+        Logger.info(f"KEY DATA: {list(data[:25])}")
+
+    for raw_i in range(self._profile["keys"]):
+        idx = 4 + raw_i
+        if idx >= len(data): break
+        pressed = bool(data[idx])
+        if pressed != self._prev[raw_i]:
+            self._prev[raw_i] = pressed
+            if pressed:
+                Logger.info(f"Key pressed: raw={raw_i} logical={KEY_REVERSE.get(raw_i, raw_i)}")
+            if self._cb:
+                logical = KEY_REVERSE.get(raw_i, raw_i)
+                try:
+                    self._cb(logical, pressed)
+                except Exception as e:
+                    Logger.error(f"Callback error: {e}")
 
     def set_key_image(self, logical_index: int, pil_image: Image.Image):
         """Send image to the physically correct key using KEY_REMAP."""
