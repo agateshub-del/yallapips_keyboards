@@ -1,7 +1,6 @@
 MetaTrader5
 numpy
 Pillow
-hidapi
 hid
 pystray
 pyinstaller
