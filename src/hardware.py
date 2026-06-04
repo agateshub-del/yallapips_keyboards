@@ -76,19 +76,27 @@ class StreamDockDevice:
         return self._profile["name"]
 
     def open(self):
-        f = hid_lib.HidDeviceFilter(
-            vendor_id=self._profile["vid"],
-            product_id=self._profile["pid"]
-        )
-        devices = f.get_devices()
-        if not devices:
-            raise RuntimeError(f"Device not found: {self._profile['name']}")
-        self._device = devices[0]
-        self._device.open()
-        self._device.set_raw_data_handler(self._on_data)
-        Logger.info(f"Connected to {self.name}")
-        self._running = True
-        self.reset()
+    f = hid_lib.HidDeviceFilter(
+        vendor_id=self._profile["vid"],
+        product_id=self._profile["pid"]
+    )
+    devices = f.get_devices()
+    if not devices:
+        raise RuntimeError(f"Device not found: {self._profile['name']}")
+    self._device = devices[0]
+    self._device.open()
+    self._device.set_raw_data_handler(self._on_data)
+    Logger.info(f"Connected to {self.name}")
+
+    # Log device report info for diagnostics
+    out_reports = self._device.find_output_reports()
+    Logger.info(f"Output reports found: {len(out_reports)}")
+    for i, r in enumerate(out_reports):
+        raw = r.get_raw_data()
+        Logger.info(f"  Report {i}: ID={raw[0] if raw else 'N/A'} Size={len(raw) if raw else 0}")
+
+    self._running = True
+    self.reset()
 
     def close(self):
         self._running = False
@@ -150,24 +158,29 @@ class StreamDockDevice:
             self.clear_key(i)
 
     def _write(self, data):
-        if not self._device:
+    if not self._device:
+        return
+    try:
+        out_reports = self._device.find_output_reports()
+        if not out_reports:
+            self._device.send_output_report([0x00] + list(data))
             return
-        try:
-            out_reports = self._device.find_output_reports()
-            if out_reports:
-                report      = out_reports[0]
-                raw         = report.get_raw_data()
-                report_size = len(raw)
-                payload     = list(data[:report_size])
-                while len(payload) < report_size:
-                    payload.append(0)
-                report.set_raw_data(payload)
-                report.send()
-            else:
-                self._device.send_output_report(list(data[:PAGE_SIZE]))
-        except Exception as e:
-            Logger.error(f"Write error: {e}")
 
+        report      = out_reports[0]
+        rdata       = report.get_raw_data()
+        report_id   = rdata[0]        # actual HID report ID from descriptor
+        report_size = len(rdata)      # total size including report ID byte
+
+        # Build payload: [report_id_from_descriptor, our_command_bytes...]
+        payload = [report_id] + list(data[:(report_size - 1)])
+        while len(payload) < report_size:
+            payload.append(0)
+
+        report.set_raw_data(payload)
+        report.send()
+
+    except Exception as e:
+        Logger.error(f"Write error: {e}")
 
 def find_device(custom_vid=None, custom_pid=None):
     candidates = list(DEVICES)
