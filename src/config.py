@@ -1,7 +1,6 @@
 """
 config.py — YALLA PIPS
-Live config: reads from JSON on every get() call.
-No restart needed — changes apply instantly.
+Live config: changes apply instantly, no restart needed.
 """
 import json
 import os
@@ -9,8 +8,9 @@ import logging
 
 Logger = logging.getLogger("yp")
 
-_CONFIG_PATH = os.path.join(os.path.dirname(__file__), '..', 'config.json')
-_CONFIG_PATH = os.path.abspath(_CONFIG_PATH)
+_CONFIG_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), '..', 'config.json')
+)
 
 _DEFAULTS = {
     "symbol":      "XAUUSD",
@@ -25,15 +25,17 @@ _DEFAULTS = {
     "brightness":  80,
     "custom_vid":  26115,
     "custom_pid":  4116,
-    "close_mode":  "volume",  # "volume" or "count"
+    "close_mode":  "volume",
 }
 
-# In-memory cache — refreshed on every save or explicit reload
 _cache = dict(_DEFAULTS)
 
 
-def _load():
-    global _cache
+def load(path=None):
+    """Public load — called by main.py on startup."""
+    global _CONFIG_PATH, _cache
+    if path:
+        _CONFIG_PATH = os.path.abspath(path)
     try:
         if os.path.exists(_CONFIG_PATH):
             with open(_CONFIG_PATH, "r") as f:
@@ -47,6 +49,24 @@ def _load():
         _cache = dict(_DEFAULTS)
 
 
+def reload():
+    """Re-read config.json from disk."""
+    load()
+    Logger.info("Config reloaded")
+
+
+def get(key, default=None):
+    return _cache.get(key, default if default is not None else _DEFAULTS.get(key))
+
+
+def set_and_save(updates: dict):
+    """Save instantly — no restart needed."""
+    global _cache
+    _cache.update(updates)
+    _save_to_disk()
+    Logger.info(f"Config saved: {updates}")
+
+
 def _save_to_disk():
     try:
         with open(_CONFIG_PATH, "w") as f:
@@ -55,25 +75,5 @@ def _save_to_disk():
         Logger.error(f"Config save error: {e}")
 
 
-def get(key, default=None):
-    """Read a config value. Always returns current in-memory value."""
-    return _cache.get(key, default if default is not None else _DEFAULTS.get(key))
-
-
-def set_and_save(updates: dict):
-    """Update one or more keys and immediately persist to disk.
-    No restart needed — changes take effect instantly."""
-    global _cache
-    _cache.update(updates)
-    _save_to_disk()
-    Logger.info(f"Config saved: {updates}")
-
-
-def reload():
-    """Re-read config.json from disk into memory."""
-    _load()
-    Logger.info("Config reloaded from disk")
-
-
-# Load on import
-_load()
+# Auto-load on import
+load()
