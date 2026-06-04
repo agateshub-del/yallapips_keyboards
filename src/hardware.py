@@ -15,23 +15,25 @@ KEY_REVERSE = {v - 1: k for k, v in enumerate(KEY_REMAP)}
 
 DEVICES = [
     {"name": "StreamDock MiraBox", "vid": 0x6603, "pid": 0x1014,
-     "keys": 15, "img_size": 96, "img_flip_h": True, "img_flip_v": True},
+     "keys": 15, "img_size": 96, "img_flip_h": False, "img_flip_v": False, "rotate": 90},
     {"name": "StreamDeck v2",      "vid": 0x0fd9, "pid": 0x006d,
-     "keys": 15, "img_size": 72, "img_flip_h": True, "img_flip_v": True},
+     "keys": 15, "img_size": 72, "img_flip_h": True,  "img_flip_v": True,  "rotate": 0},
     {"name": "StreamDeck v1",      "vid": 0x0fd9, "pid": 0x0060,
-     "keys": 15, "img_size": 72, "img_flip_h": True, "img_flip_v": True},
+     "keys": 15, "img_size": 72, "img_flip_h": True,  "img_flip_v": True,  "rotate": 0},
 ]
 
 DATA_SIZE   = 1024
 REPORT_SIZE = 1025
 
 
-def _encode_jpeg(img, size, fh, fv):
+def _encode_jpeg(img, size, fh, fv, rotate=0):
     img = img.resize((size, size), Image.LANCZOS).convert("RGB")
     if fh:
         img = img.transpose(Image.FLIP_LEFT_RIGHT)
     if fv:
         img = img.transpose(Image.FLIP_TOP_BOTTOM)
+    if rotate:
+        img = img.rotate(-rotate)   # negative = clockwise in PIL
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=90)
     return buf.getvalue()
@@ -140,7 +142,8 @@ class StreamDockDevice:
             return
         p      = self._profile
         jpeg   = _encode_jpeg(pil_image, p["img_size"],
-                               p["img_flip_h"], p["img_flip_v"])
+                               p["img_flip_h"], p["img_flip_v"],
+                               p.get("rotate", 0))
         padded = jpeg + b'\x00' * (-len(jpeg) % DATA_SIZE)
         with self._lock:
             bat = bytearray(DATA_SIZE)
@@ -196,8 +199,9 @@ def find_device(custom_vid=None, custom_pid=None):
             "pid":  custom_pid,
             "keys": 15,
             "img_size":   96,
-            "img_flip_h": True,
-            "img_flip_v": True
+            "img_flip_h": False,
+            "img_flip_v": False,
+            "rotate":     90
         })
     for p in candidates:
         f = hid_lib.HidDeviceFilter(
