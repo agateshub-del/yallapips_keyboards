@@ -15,7 +15,7 @@ KEY_REVERSE = {v - 1: k for k, v in enumerate(KEY_REMAP)}
 
 DEVICES = [
     {"name": "StreamDock MiraBox", "vid": 0x6603, "pid": 0x1014,
-     "keys": 15, "img_size": 96, "img_flip_h": False, "img_flip_v": False, "rotate": 180},
+     "keys": 15, "img_size": 96, "img_flip_h": False, "img_flip_v": False, "rotate": 90},
     {"name": "StreamDeck v2",      "vid": 0x0fd9, "pid": 0x006d,
      "keys": 15, "img_size": 72, "img_flip_h": True,  "img_flip_v": True,  "rotate": 0},
     {"name": "StreamDeck v1",      "vid": 0x0fd9, "pid": 0x0060,
@@ -33,21 +33,7 @@ def _encode_jpeg(img, size, fh, fv, rotate=0):
     if fv:
         img = img.transpose(Image.FLIP_TOP_BOTTOM)
     if rotate:
-        img = img.rotate(-rotate)   # negative = clockwise in PIL
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=90)
-    return buf.getvalue()
-
-
-def _encode_jpeg_raw(img, fh, fv, rotate=0):
-    """Encode without forcing square resize — used for long display."""
-    img = img.convert("RGB")
-    if fh:
-        img = img.transpose(Image.FLIP_LEFT_RIGHT)
-    if fv:
-        img = img.transpose(Image.FLIP_TOP_BOTTOM)
-    if rotate:
-        img = img.rotate(-rotate, expand=True)
+        img = img.rotate(-rotate)
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=90)
     return buf.getvalue()
@@ -152,7 +138,6 @@ class StreamDockDevice:
                     Logger.error(f"Callback error: {e}")
 
     def _send_jpeg_to_key(self, device_key_number, jpeg_bytes):
-        """Send pre-encoded JPEG bytes to any device key number."""
         if not self._write_handle:
             return
         padded = jpeg_bytes + b'\x00' * (-len(jpeg_bytes) % DATA_SIZE)
@@ -180,12 +165,11 @@ class StreamDockDevice:
         self._send_jpeg_to_key(dev_key, jpeg)
 
     def set_long_display(self, pil_image):
-        """Send image to the long strip display (device key 18).
-        Image is sent at its native size without forcing 96x96 resize."""
+        """Long display = device key 18, same 96x96 JPEG format as keys."""
         p    = self._profile
-        jpeg = _encode_jpeg_raw(pil_image,
-                                 p["img_flip_h"], p["img_flip_v"],
-                                 p.get("rotate", 0))
+        jpeg = _encode_jpeg(pil_image, p["img_size"],
+                             p["img_flip_h"], p["img_flip_v"],
+                             p.get("rotate", 0))
         self._send_jpeg_to_key(18, jpeg)
 
     def _write_block(self, data):
@@ -221,7 +205,7 @@ def find_device(custom_vid=None, custom_pid=None):
             "img_size":   96,
             "img_flip_h": False,
             "img_flip_v": False,
-            "rotate":     180
+            "rotate":     90
         })
     for p in candidates:
         f = hid_lib.HidDeviceFilter(
