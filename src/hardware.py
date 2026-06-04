@@ -16,6 +16,7 @@ DEVICES = [
 
 PAGE_SIZE = 512
 
+
 def _encode_image(pil_image, size, flip_h, flip_v):
     img = pil_image.resize((size, size), Image.LANCZOS).convert("RGB")
     if flip_h:
@@ -25,6 +26,7 @@ def _encode_image(pil_image, size, flip_h, flip_v):
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=95)
     return buf.getvalue()
+
 
 def _build_image_payload(key_index, img_data, page_hdr):
     pages = []
@@ -36,44 +38,48 @@ def _build_image_payload(key_index, img_data, page_hdr):
         remaining = remaining[payload_size:]
         is_last = 1 if len(remaining) == 0 else 0
         if page_hdr == 8:
-            # Correct 8-byte header: B+B+B+B+H+H = 1+1+1+1+2+2 = 8 bytes
+            # 8-byte header: B+B+B+B+H+H = 1+1+1+1+2+2 = 8 bytes exactly
             header = struct.pack("<BBBBHH",
-                                 0x02,          # report type
-                                 0x07,          # image data command
-                                 key_index,     # key index
-                                 is_last,       # last page flag
-                                 len(chunk),    # payload length
-                                 page_num)      # page number
+                                 0x02,
+                                 0x07,
+                                 key_index,
+                                 is_last,
+                                 len(chunk),
+                                 page_num)
         else:
             header = struct.pack("<BBHBB",
                                  0x02, 0x01, len(chunk), is_last, key_index + 1)
             header += b'\x00' * (16 - len(header))
         padded = bytearray(header) + bytearray(chunk)
-        # Only pad if we have room
         if len(padded) < PAGE_SIZE:
             padded += bytearray(PAGE_SIZE - len(padded))
         pages.append(bytes(padded[:PAGE_SIZE]))
         page_num += 1
     return pages
 
+
 class StreamDockDevice:
     def __init__(self, profile):
-        self._profile  = profile
-        self._device   = None
-        self._lock     = threading.Lock()
-        self._running  = False
-        self._cb       = None
-        self._prev     = [False] * profile["keys"]
+        self._profile = profile
+        self._device  = None
+        self._lock    = threading.Lock()
+        self._running = False
+        self._cb      = None
+        self._prev    = [False] * profile["keys"]
 
     @property
-    def key_count(self): return self._profile["keys"]
+    def key_count(self):
+        return self._profile["keys"]
 
     @property
-    def name(self): return self._profile["name"]
+    def name(self):
+        return self._profile["name"]
 
     def open(self):
-        f = hid_lib.HidDeviceFilter(vendor_id=self._profile["vid"],
-                                     product_id=self._profile["pid"])
+        f = hid_lib.HidDeviceFilter(
+            vendor_id=self._profile["vid"],
+            product_id=self._profile["pid"]
+        )
         devices = f.get_devices()
         if not devices:
             raise RuntimeError(f"Device not found: {self._profile['name']}")
@@ -116,7 +122,7 @@ class StreamDockDevice:
             payload[0:6] = [0x03, 0x08, pct, 0x00, 0x00, 0x00]
         else:
             payload[0:5] = [0x05, 0x55, 0xaa, 0xd1, 0x01]
-            payload[5] = pct
+            payload[5]   = pct
         self._write(bytes(payload))
 
     def reset(self):
@@ -128,10 +134,10 @@ class StreamDockDevice:
         self._write(bytes(payload))
 
     def set_key_image(self, key_index, pil_image):
-        p = self._profile
+        p        = self._profile
         img_data = _encode_image(pil_image, p["img_size"],
                                   p["img_flip_h"], p["img_flip_v"])
-        pages = _build_image_payload(key_index, img_data, p["page_hdr"])
+        pages    = _build_image_payload(key_index, img_data, p["page_hdr"])
         with self._lock:
             for page in pages:
                 self._write(page)
@@ -144,37 +150,43 @@ class StreamDockDevice:
             self.clear_key(i)
 
     def _write(self, data):
-    if not self._device:
-        return
-    try:
-        out_reports = self._device.find_output_reports()
-        if out_reports:
-            report = out_reports[0]
-            raw = report.get_raw_data()
-            report_size = len(raw)
-            # Fit data to device's actual report size
-            payload = list(data[:report_size])
-            while len(payload) < report_size:
-                payload.append(0)
-            report.set_raw_data(payload)
-            report.send()
-        else:
-            self._device.send_output_report(list(data[:PAGE_SIZE]))
-    except Exception as e:
-        Logger.error(f"Write error: {e}")
+        if not self._device:
+            return
+        try:
+            out_reports = self._device.find_output_reports()
+            if out_reports:
+                report      = out_reports[0]
+                raw         = report.get_raw_data()
+                report_size = len(raw)
+                payload     = list(data[:report_size])
+                while len(payload) < report_size:
+                    payload.append(0)
+                report.set_raw_data(payload)
+                report.send()
+            else:
+                self._device.send_output_report(list(data[:PAGE_SIZE]))
+        except Exception as e:
+            Logger.error(f"Write error: {e}")
+
 
 def find_device(custom_vid=None, custom_pid=None):
     candidates = list(DEVICES)
     if custom_vid and custom_pid:
         candidates.insert(0, {
-            "name": "Custom Device",
-            "vid": custom_vid, "pid": custom_pid,
-            "keys": 15, "img_size": 72,
-            "img_flip_h": True, "img_flip_v": True, "page_hdr": 8
+            "name":       "Custom Device",
+            "vid":        custom_vid,
+            "pid":        custom_pid,
+            "keys":       15,
+            "img_size":   72,
+            "img_flip_h": True,
+            "img_flip_v": True,
+            "page_hdr":   8
         })
     for profile in candidates:
-        f = hid_lib.HidDeviceFilter(vendor_id=profile["vid"],
-                                     product_id=profile["pid"])
+        f = hid_lib.HidDeviceFilter(
+            vendor_id=profile["vid"],
+            product_id=profile["pid"]
+        )
         if f.get_devices():
             Logger.info(f"Found: {profile['name']}")
             return StreamDockDevice(profile)
