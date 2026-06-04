@@ -3,16 +3,18 @@ import threading
 import struct
 import io
 import logging
+import time
 import pywinusb.hid as hid_lib
 from PIL import Image
 
 Logger = logging.getLogger("yp")
 
-# ── Windows API constants for direct HID write ────────────────────
 GENERIC_WRITE    = 0x40000000
+GENERIC_READ     = 0x80000000
 OPEN_EXISTING    = 3
 FILE_SHARE_READ  = 0x00000001
 FILE_SHARE_WRITE = 0x00000002
+INVALID_HANDLE   = ctypes.c_void_p(-1).value
 
 DEVICES = [
     {"name": "StreamDock MiraBox", "vid": 0x6603, "pid": 0x1014, "keys": 15, "img_size": 72, "img_flip_h": True,  "img_flip_v": True,  "page_hdr": 8},
@@ -20,32 +22,6 @@ DEVICES = [
     {"name": "StreamDeck v2",      "vid": 0x0fd9, "pid": 0x006d, "keys": 15, "img_size": 72, "img_flip_h": True,  "img_flip_v": True,  "page_hdr": 8},
     {"name": "StreamDeck v1",      "vid": 0x0fd9, "pid": 0x0060, "keys": 15, "img_size": 72, "img_flip_h": True,  "img_flip_v": True,  "page_hdr": 16},
 ]
-
-
-def _win_write(device_path, data):
-    """Write raw bytes directly to HID device using Windows API.
-    Bypasses pywinusb connection state checks entirely."""
-    k32    = ctypes.windll.kernel32
-    handle = k32.CreateFileW(
-        device_path,
-        GENERIC_WRITE,
-        FILE_SHARE_READ | FILE_SHARE_WRITE,
-        None,
-        OPEN_EXISTING,
-        0,
-        None
-    )
-    if handle == ctypes.c_void_p(-1).value or handle == 0:
-        Logger.error(f"CreateFile failed for {device_path}")
-        return False
-    try:
-        buf     = (ctypes.c_ubyte * len(data))(*data)
-        written = ctypes.c_ulong(0)
-        result  = k32.WriteFile(handle, buf, len(data),
-                                ctypes.byref(written), None)
-        return bool(result)
-    finally:
-        k32.CloseHandle(handle)
 
 
 def _encode_image(pil_image, size, flip_h, flip_v):
@@ -87,15 +63,16 @@ def _build_image_payload(key_index, img_data, page_hdr, data_size):
 class StreamDockDevice:
 
     def __init__(self, profile):
-        self._profile     = profile
-        self._device      = None
-        self._device_path = None
-        self._lock        = threading.Lock()
-        self._running     = False
-        self._cb          = None
-        self._prev        = [False] * profile["keys"]
-        self._report_size = 1025
-        self._data_size   = 1024
+        self._profile      = profile
+        self._device       = None
+        self._device_path  = None
+        self._write_handle = None
+        self._lock         = threading.Lock()
+        self._running      = False
+        self._cb           = None
+        self._prev         = [False] * profile["keys"]
+        self._report_size  = 1025
+        self._data_size    = 1024
 
     @property
     def key_count(self):
@@ -114,21 +91,16 @@ class StreamDockDevice:
         if not devices:
             raise RuntimeError(f"Device not found: {self._profile['name']}")
 
-        # Log all interfaces found
-        Logger.info(f"HID interfaces found: {len(devices)}")
-        for i, d in enumerate(devices):
-            Logger.info(f"  Interface {i}: path={d.device_path}")
-
         self._device      = devices[0]
         self._device_path = self._device.device_path
-        Logger.info(f"Using path: {self._device_path}")
+        Logger.info(f"Device path: {self._device_path}")
 
-        # Open for READING only (key press events)
+        # Open for reading (key events)
         self._device.open()
         self._device.set_raw_data_handler(self._on_data)
         Logger.info(f"Connected to {self.name}")
 
-        # Detect report size via output report descriptor
+        # Detect report size
         out_reports = self._device.find_output_reports()
         if out_reports:
             raw = out_reports[0].get_raw_data()
@@ -136,14 +108,50 @@ class StreamDockDevice:
             self._data_size   = self._report_size - 1
         Logger.info(f"ReportSize={self._report_size} DataSize={self._data_size}")
 
+        # Open persistent write handle
+        self._open_write_handle()
         self._running = True
-        # Test write to verify path works
-        test = [0x00] + [0x00] * self._data_size
-        ok = _win_write(self._device_path, test[:self._report_size])
-        Logger.info(f"Test write result: {'OK' if ok else 'FAILED'}")
+
+    def _open_write_handle(self):
+        k32 = ctypes.windll.kernel32
+        # Try GENERIC_WRITE first
+        h = k32.CreateFileW(
+            self._device_path,
+            GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            None, OPEN_EXISTING, 0, None
+        )
+        if h == INVALID_HANDLE or h == 0:
+            err = k32.GetLastError()
+            Logger.error(f"Write handle (WRITE only) failed: error {err}")
+            # Try READ|WRITE
+            h = k32.CreateFileW(
+                self._device_path,
+                GENERIC_READ | GENERIC_WRITE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                None, OPEN_EXISTING, 0, None
+            )
+            if h == INVALID_HANDLE or h == 0:
+                err = k32.GetLastError()
+                Logger.error(f"Write handle (READ|WRITE) failed: error {err}")
+                self._write_handle = None
+                return
+        Logger.info(f"Write handle opened OK: {h}")
+        self._write_handle = h
+
+        # Test write with zeros
+        test = (ctypes.c_ubyte * self._report_size)(*([0x00] * self._report_size))
+        written = ctypes.c_ulong(0)
+        ok = k32.WriteFile(h, test, self._report_size, ctypes.byref(written), None)
+        Logger.info(f"Test write: {'OK' if ok else 'FAILED'} bytes_written={written.value}")
+        if not ok:
+            Logger.error(f"Test write error code: {k32.GetLastError()}")
 
     def close(self):
         self._running = False
+        if self._write_handle:
+            ctypes.windll.kernel32.CloseHandle(self._write_handle)
+            self._write_handle = None
         if self._device:
             try:
                 self._device.close()
@@ -182,6 +190,7 @@ class StreamDockDevice:
         with self._lock:
             for page in pages:
                 self._write(page)
+                time.sleep(0.002)   # 2ms gap between pages
 
     def clear_key(self, key_index):
         self.set_key_image(key_index, Image.new("RGB", (72, 72), (0, 0, 0)))
@@ -191,16 +200,28 @@ class StreamDockDevice:
             self.clear_key(i)
 
     def _write(self, data):
-        if not self._device_path:
+        if not self._write_handle:
             return
+        k32 = ctypes.windll.kernel32
         try:
-            # Prepend report ID 0x00 then our data
             full = [0x00] + list(data[:(self._report_size - 1)])
             while len(full) < self._report_size:
                 full.append(0)
-            ok = _win_write(self._device_path, full)
-            if not ok:
-                Logger.error("Write failed (WinAPI)")
+            buf     = (ctypes.c_ubyte * len(full))(*full)
+            written = ctypes.c_ulong(0)
+            result  = k32.WriteFile(
+                self._write_handle, buf, len(full),
+                ctypes.byref(written), None
+            )
+            if not result:
+                err = k32.GetLastError()
+                Logger.error(f"WriteFile failed: error {err} written={written.value}")
+                # Handle stale handle — reopen
+                if err in (6, 1167):
+                    Logger.info("Reopening write handle...")
+                    k32.CloseHandle(self._write_handle)
+                    self._write_handle = None
+                    self._open_write_handle()
         except Exception as e:
             Logger.error(f"Write error: {e}")
 
@@ -209,14 +230,9 @@ def find_device(custom_vid=None, custom_pid=None):
     candidates = list(DEVICES)
     if custom_vid and custom_pid:
         candidates.insert(0, {
-            "name":       "Custom Device",
-            "vid":        custom_vid,
-            "pid":        custom_pid,
-            "keys":       15,
-            "img_size":   72,
-            "img_flip_h": True,
-            "img_flip_v": True,
-            "page_hdr":   8
+            "name": "Custom Device", "vid": custom_vid, "pid": custom_pid,
+            "keys": 15, "img_size": 72,
+            "img_flip_h": True, "img_flip_v": True, "page_hdr": 8
         })
     for profile in candidates:
         f = hid_lib.HidDeviceFilter(
