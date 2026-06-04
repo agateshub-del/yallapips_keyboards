@@ -1,9 +1,12 @@
-from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
-import os, glob, sys
+import os
+import sys
+import glob
 
 block_cipher = None
 
+# Find hidapi.dll - check hid package folder AND System32
 hid_dll = glob.glob(os.path.join(sys.prefix, '**', 'hidapi.dll'), recursive=True)
+hid_dll += glob.glob('C:/Windows/System32/hidapi.dll')
 hid_bins = [(dll, '.') for dll in hid_dll]
 
 a = Analysis(
@@ -30,6 +33,7 @@ a = Analysis(
     cipher=block_cipher,
     noarchive=False
 )
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(
