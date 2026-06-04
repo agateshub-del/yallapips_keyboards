@@ -1,6 +1,6 @@
 MetaTrader5
 numpy
 Pillow
-cython-hidapi
+pywinusb
 pystray
 pyinstaller
