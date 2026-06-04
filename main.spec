@@ -23,7 +23,7 @@ a = Analysis(
         'MetaTrader5',
         'PIL', 'PIL.Image', 'PIL.ImageDraw', 'PIL.ImageFont',
         'pystray', 'pystray._win32',
-        'hid',
+        'pywinusb', 'pywinusb.hid',
         'src.hardware', 'src.keyboard', 'src.key_renderer',
         'src.mt5_bridge', 'src.config', 'src.gui', 'src.logger',
     ],
