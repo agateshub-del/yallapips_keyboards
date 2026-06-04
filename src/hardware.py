@@ -10,7 +10,7 @@ OPEN_EXISTING    = 3
 FILE_SHARE_READ  = 0x00000001
 FILE_SHARE_WRITE = 0x00000002
 
-KEY_REMAP = [13, 14, 15, 10, 11, 12, 7, 8, 9, 4, 5, 6, 1, 2, 3]
+KEY_REMAP   = [13, 14, 15, 10, 11, 12, 7, 8, 9, 4, 5, 6, 1, 2, 3]
 KEY_REVERSE = {v - 1: k for k, v in enumerate(KEY_REMAP)}
 
 DEVICES = [
@@ -67,8 +67,10 @@ class StreamDockDevice:
         return self._profile["name"]
 
     def open(self):
-        f       = hid_lib.HidDeviceFilter(vendor_id=self._profile["vid"],
-                                           product_id=self._profile["pid"])
+        f = hid_lib.HidDeviceFilter(
+            vendor_id=self._profile["vid"],
+            product_id=self._profile["pid"]
+        )
         devices = f.get_devices()
         if not devices:
             raise RuntimeError(f"Device not found: {self._profile['name']}")
@@ -82,14 +84,18 @@ class StreamDockDevice:
 
     def _open_write_handle(self):
         k32 = ctypes.windll.kernel32
-        h   = k32.CreateFileW(self._device_path, GENERIC_WRITE,
-                               FILE_SHARE_READ | FILE_SHARE_WRITE,
-                               None, OPEN_EXISTING, 0, None)
+        h   = k32.CreateFileW(
+            self._device_path, GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            None, OPEN_EXISTING, 0, None
+        )
         if h in (-1, 0):
-            h = k32.CreateFileW(self._device_path,
-                                 GENERIC_READ | GENERIC_WRITE,
-                                 FILE_SHARE_READ | FILE_SHARE_WRITE,
-                                 None, OPEN_EXISTING, 0, None)
+            h = k32.CreateFileW(
+                self._device_path,
+                GENERIC_READ | GENERIC_WRITE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                None, OPEN_EXISTING, 0, None
+            )
         if h not in (-1, 0):
             self._write_handle = h
             Logger.info(f"Write handle OK: {h}")
@@ -111,30 +117,32 @@ class StreamDockDevice:
         self._cb = cb
 
     def _on_data(self, data):
-        if any(data[4:20]):
-            Logger.info(f"KEY DATA: {list(data[:25])}")
-        for raw_i in range(self._profile["keys"]):
-            idx = 4 + raw_i
-            if idx >= len(data):
-                break
-            pressed = bool(data[idx])
-            if pressed != self._prev[raw_i]:
-                self._prev[raw_i] = pressed
-                if pressed:
-                    Logger.info(f"Key pressed: raw={raw_i} logical={KEY_REVERSE.get(raw_i, raw_i)}")
-                if self._cb:
-                    logical = KEY_REVERSE.get(raw_i, raw_i)
-                    try:
-                        self._cb(logical, pressed)
-                    except Exception as e:
-                        Logger.error(f"Callback error: {e}")
+        if len(data) < 12:
+            return
+        key_num    = data[10]
+        is_pressed = bool(data[11])
+        if key_num < 1 or key_num > 15:
+            return
+        raw_i   = key_num - 1
+        logical = KEY_REVERSE.get(raw_i, raw_i)
+        if is_pressed != self._prev[raw_i]:
+            self._prev[raw_i] = is_pressed
+            if is_pressed:
+                Logger.info(f"Key pressed: device={key_num} logical={logical}")
+            if self._cb:
+                try:
+                    self._cb(logical, is_pressed)
+                except Exception as e:
+                    Logger.error(f"Callback error: {e}")
 
     def set_key_image(self, logical_index, pil_image):
         if not self._write_handle:
             return
         p       = self._profile
-        jpeg    = _encode_jpeg(pil_image, p["img_size"],
-                                p["img_flip_h"], p["img_flip_v"])
+        jpeg    = _encode_jpeg(
+            pil_image, p["img_size"],
+            p["img_flip_h"], p["img_flip_v"]
+        )
         dev_key = KEY_REMAP[logical_index]
         padded  = jpeg + b'\x00' * (-len(jpeg) % DATA_SIZE)
         with self._lock:
@@ -178,12 +186,19 @@ def find_device(custom_vid=None, custom_pid=None):
     candidates = list(DEVICES)
     if custom_vid and custom_pid:
         candidates.insert(0, {
-            "name": "Custom Device", "vid": custom_vid, "pid": custom_pid,
-            "keys": 15, "img_size": 96,
-            "img_flip_h": False, "img_flip_v": True
+            "name": "Custom Device",
+            "vid":  custom_vid,
+            "pid":  custom_pid,
+            "keys": 15,
+            "img_size":   96,
+            "img_flip_h": False,
+            "img_flip_v": True
         })
     for p in candidates:
-        f = hid_lib.HidDeviceFilter(vendor_id=p["vid"], product_id=p["pid"])
+        f = hid_lib.HidDeviceFilter(
+            vendor_id=p["vid"],
+            product_id=p["pid"]
+        )
         if f.get_devices():
             Logger.info(f"Found: {p['name']}")
             return StreamDockDevice(p)
