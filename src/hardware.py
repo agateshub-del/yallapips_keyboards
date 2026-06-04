@@ -14,8 +14,6 @@ DEVICES = [
     {"name": "StreamDeck v1",      "vid": 0x0fd9, "pid": 0x0060, "keys": 15, "img_size": 72, "img_flip_h": True,  "img_flip_v": True,  "page_hdr": 16},
 ]
 
-PAGE_SIZE = 512
-
 
 def _encode_image(pil_image, size, flip_h, flip_v):
     img = pil_image.resize((size, size), Image.LANCZOS).convert("RGB")
@@ -28,15 +26,15 @@ def _encode_image(pil_image, size, flip_h, flip_v):
     return buf.getvalue()
 
 
-def _build_image_payload(key_index, img_data, page_hdr):
-    pages = []
+def _build_image_payload(key_index, img_data, page_hdr, data_size):
+    pages     = []
     remaining = img_data
-    page_num = 0
-    payload_size = PAGE_SIZE - page_hdr
+    page_num  = 0
+    payload_size = data_size - page_hdr
     while remaining:
-        chunk = remaining[:payload_size]
+        chunk     = remaining[:payload_size]
         remaining = remaining[payload_size:]
-        is_last = 1 if len(remaining) == 0 else 0
+        is_last   = 1 if len(remaining) == 0 else 0
         if page_hdr == 8:
             header = struct.pack("<BBBBHH",
                                  0x02, 0x07, key_index,
@@ -46,9 +44,9 @@ def _build_image_payload(key_index, img_data, page_hdr):
                                  0x02, 0x01, len(chunk), is_last, key_index + 1)
             header += b'\x00' * (16 - len(header))
         padded = bytearray(header) + bytearray(chunk)
-        if len(padded) < PAGE_SIZE:
-            padded += bytearray(PAGE_SIZE - len(padded))
-        pages.append(bytes(padded[:PAGE_SIZE]))
+        if len(padded) < data_size:
+            padded += bytearray(data_size - len(padded))
+        pages.append(bytes(padded[:data_size]))
         page_num += 1
     return pages
 
@@ -56,12 +54,15 @@ def _build_image_payload(key_index, img_data, page_hdr):
 class StreamDockDevice:
 
     def __init__(self, profile):
-        self._profile = profile
-        self._device  = None
-        self._lock    = threading.Lock()
-        self._running = False
-        self._cb      = None
-        self._prev    = [False] * profile["keys"]
+        self._profile     = profile
+        self._device      = None
+        self._lock        = threading.Lock()
+        self._running     = False
+        self._cb          = None
+        self._prev        = [False] * profile["keys"]
+        self._report_size = 1025   # updated on open()
+        self._data_size   = 1024   # report_size - 1 (report ID byte)
+        self._report_id   = 0
 
     @property
     def key_count(self):
@@ -83,13 +84,19 @@ class StreamDockDevice:
         self._device.open()
         self._device.set_raw_data_handler(self._on_data)
         Logger.info(f"Connected to {self.name}")
+
+        # Auto-detect report size
         out_reports = self._device.find_output_reports()
-        Logger.info(f"Output reports found: {len(out_reports)}")
-        for i, r in enumerate(out_reports):
-            raw = r.get_raw_data()
-            Logger.info(f"  Report {i}: ID={raw[0] if raw else 'N/A'} Size={len(raw) if raw else 0}")
+        Logger.info(f"Output reports: {len(out_reports)}")
+        if out_reports:
+            raw = out_reports[0].get_raw_data()
+            self._report_id   = raw[0]
+            self._report_size = len(raw)
+            self._data_size   = self._report_size - 1
+            Logger.info(f"Report ID={self._report_id} ReportSize={self._report_size} DataSize={self._data_size}")
+
         self._running = True
-        self.reset()
+        # NOTE: No reset() call — wrong reset command disconnects MiraBox device
 
     def close(self):
         self._running = False
@@ -118,34 +125,22 @@ class StreamDockDevice:
 
     def set_brightness(self, pct):
         pct = max(0, min(100, pct))
-        payload = bytearray(PAGE_SIZE)
-        if self._profile["page_hdr"] == 8:
-            payload[0:6] = [0x03, 0x08, pct, 0x00, 0x00, 0x00]
-        else:
-            payload[0:5] = [0x05, 0x55, 0xaa, 0xd1, 0x01]
-            payload[5]   = pct
-        self._write(bytes(payload))
-
-    def reset(self):
-        payload = bytearray(PAGE_SIZE)
-        if self._profile["page_hdr"] == 8:
-            payload[0:2] = [0x03, 0x02]
-        else:
-            payload[0:5] = [0x0b, 0x63, 0x00, 0x00, 0x00]
+        payload = bytearray(self._data_size)
+        payload[0:6] = [0x03, 0x08, pct, 0x00, 0x00, 0x00]
         self._write(bytes(payload))
 
     def set_key_image(self, key_index, pil_image):
         p        = self._profile
         img_data = _encode_image(pil_image, p["img_size"],
                                   p["img_flip_h"], p["img_flip_v"])
-        pages    = _build_image_payload(key_index, img_data, p["page_hdr"])
+        pages    = _build_image_payload(key_index, img_data,
+                                         p["page_hdr"], self._data_size)
         with self._lock:
             for page in pages:
                 self._write(page)
 
     def clear_key(self, key_index):
-        self.set_key_image(key_index,
-                           Image.new("RGB", (72, 72), (0, 0, 0)))
+        self.set_key_image(key_index, Image.new("RGB", (72, 72), (0, 0, 0)))
 
     def clear_all(self):
         for i in range(self.key_count):
@@ -157,14 +152,13 @@ class StreamDockDevice:
         try:
             out_reports = self._device.find_output_reports()
             if not out_reports:
-                self._device.send_output_report([0x00] + list(data))
                 return
-            report      = out_reports[0]
-            rdata       = report.get_raw_data()
-            report_id   = rdata[0]
-            report_size = len(rdata)
-            payload     = [report_id] + list(data[:(report_size - 1)])
-            while len(payload) < report_size:
+            report  = out_reports[0]
+            rdata   = report.get_raw_data()
+            rid     = rdata[0]
+            rsize   = len(rdata)
+            payload = [rid] + list(data[:(rsize - 1)])
+            while len(payload) < rsize:
                 payload.append(0)
             report.set_raw_data(payload)
             report.send()
