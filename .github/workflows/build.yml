@@ -22,7 +22,6 @@ jobs:
 
       - name: Install dependencies
         run: pip install MetaTrader5 numpy Pillow hid pystray pyinstaller
-
       - name: Download and fix hidapi DLL
         shell: pwsh
         run: |
