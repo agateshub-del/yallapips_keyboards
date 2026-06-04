@@ -21,7 +21,8 @@ jobs:
           cache: "pip"
 
       - name: Install dependencies
-        run: pip install MetaTrader5 numpy Pillow hid pystray pyinstaller
+        run: pip install MetaTrader5 numpy Pillow cython-hidapi pystray pyinstaller
+
       - name: Download and fix hidapi DLL
         shell: pwsh
         run: |
@@ -31,13 +32,13 @@ jobs:
           Expand-Archive -Path "hidapi-win.zip" -DestinationPath "hidapi-win"
           Copy-Item -Force "hidapi-win\x64\hidapi.dll" "$hidDir\"
           Copy-Item -Force "hidapi-win\x64\hidapi.dll" "C:\Windows\System32\"
-          Write-Host "DLL installed"
           python -c "
-          import os, importlib.util, sys
+          import os, importlib.util
           hid_dir = os.path.dirname(importlib.util.find_spec('hid').origin)
           os.add_dll_directory(hid_dir)
           import hid
-          print('HID OK:', hid.__file__)
+          print('hid.device:', hasattr(hid, 'device'))
+          print('HID OK')
           "
       - name: Build EXE
         run: pyinstaller main.spec
