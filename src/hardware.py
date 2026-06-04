@@ -33,7 +33,7 @@ def _encode_jpeg(img, size, fh, fv, rotate=0):
     if fv:
         img = img.transpose(Image.FLIP_TOP_BOTTOM)
     if rotate:
-        img = img.rotate(-rotate)
+        img = img.rotate(rotate)
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=90)
     return buf.getvalue()
