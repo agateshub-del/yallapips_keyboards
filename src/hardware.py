@@ -44,14 +44,11 @@ from PIL import Image
 Logger = logging.getLogger("yp")
 # ── Known device profiles ──────────────────────────────────────────
 DEVICES = [
-    # MiraBox StreamDock — same HID protocol as Stream Deck
-    {"name": "StreamDock",          "vid": 0x0fd9, "pid": 0x0063, "keys": 15, "img_size": 72,  "img_flip_h": True,  "img_flip_v": True,  "page_hdr": 8},
-    # Elgato Stream Deck Original v2 (15 keys)
-    {"name": "StreamDeck v2",       "vid": 0x0fd9, "pid": 0x006d, "keys": 15, "img_size": 72,  "img_flip_h": True,  "img_flip_v": True,  "page_hdr": 8},
-    # Elgato Stream Deck Original v1 (15 keys)
-    {"name": "StreamDeck v1",       "vid": 0x0fd9, "pid": 0x0060, "keys": 15, "img_size": 72,  "img_flip_h": True,  "img_flip_v": True,  "page_hdr": 16},
-    # MiraBox alternate PID (seen on some units)
-    {"name": "StreamDock Alt",      "vid": 0x0fd9, "pid": 0x0080, "keys": 15, "img_size": 72,  "img_flip_h": True,  "img_flip_v": True,  "page_hdr": 8},
+    {"name": "StreamDock MiraBox", "vid": 0x6603, "pid": 0x1014, "keys": 15, "img_size": 72, "img_flip_h": True, "img_flip_v": True, "page_hdr": 8},
+    {"name": "StreamDock",         "vid": 0x0fd9, "pid": 0x0063, "keys": 15, "img_size": 72, "img_flip_h": True, "img_flip_v": True, "page_hdr": 8},
+    {"name": "StreamDeck v2",      "vid": 0x0fd9, "pid": 0x006d, "keys": 15, "img_size": 72, "img_flip_h": True, "img_flip_v": True, "page_hdr": 8},
+    {"name": "StreamDeck v1",      "vid": 0x0fd9, "pid": 0x0060, "keys": 15, "img_size": 72, "img_flip_h": True, "img_flip_v": True, "page_hdr": 8},
+    {"name": "StreamDock Alt",     "vid": 0x0fd9, "pid": 0x0080, "keys": 15, "img_size": 72, "img_flip_h": True, "img_flip_v": True, "page_hdr": 8},
 ]
 
 PAGE_SIZE        = 512    # HID report size
