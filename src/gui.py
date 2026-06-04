@@ -129,9 +129,10 @@ def start_tray(on_quit):
 
 # ── TrayApp class — keeps compatibility with main.py ─────────────
 class TrayApp:
-    def __init__(self, keyboard=None):
-        if keyboard:
-            set_keyboard_ref(keyboard)
+    def __init__(self, keyboard_controller=None, keyboard=None):
+        kb = keyboard_controller or keyboard
+        if kb:
+            set_keyboard_ref(kb)
 
     def run(self, on_quit=None):
         def _quit(icon):
