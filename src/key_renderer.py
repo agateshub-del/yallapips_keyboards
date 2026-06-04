@@ -259,64 +259,42 @@ def _active_sessions(utc_now: datetime.datetime) -> list:
 def render_long_display(profit: float = 0.0,
                         currency: str = "USD",
                         connected: bool = False) -> Image.Image:
-    """
-    96x288 portrait image for the right-side long strip display.
-    Three equal sections: Session / Local Time / Open P&L.
-    Session auto-detected from UTC time (works anywhere in the world).
-    """
-    W, H = 96, 288
-    img  = Image.new("RGB", (W, H), (8, 10, 16))
+    img  = Image.new("RGB", (96, 96), (8, 10, 16))
     draw = ImageDraw.Draw(img)
 
     utc_now   = datetime.datetime.now(datetime.timezone.utc)
     local_now = datetime.datetime.now()
 
-    # ── Active sessions ───────────────────────────────────────────
-    sessions = _active_sessions(utc_now)
+    sessions  = _active_sessions(utc_now)
     sess_name, sess_color = sessions[-1]
     if len(sessions) > 1:
         sess_name = "/".join(s[0][:3] for s in sessions)
 
-    # ── SECTION 1: Session (top third y=0–96) ─────────────────────
-    draw.rectangle([(0, 0),  (W-1, 95)],  fill=(12, 14, 22))
-    draw.rectangle([(0, 0),  (W-1, 95)],  outline=sess_color, width=2)
-    draw.ellipse(  [(8, 10), (22, 24)],   fill=sess_color)
-    draw.text((W//2, 38), "SESSION",
-              font=_font(10), fill=(100, 100, 120), anchor="mm")
-    draw.text((W//2, 62), sess_name,
-              font=_font(14, bold=True), fill=sess_color, anchor="mm")
-    draw.text((W//2, 82), utc_now.strftime("UTC %H:%M"),
-              font=_font(9), fill=(80, 90, 110), anchor="mm")
+    # Session band (top)
+    draw.rectangle([(0,0),(95,28)], fill=tuple(c//5 for c in sess_color))
+    draw.ellipse([(4,8),(14,18)], fill=sess_color)
+    draw.text((52, 14), sess_name, font=_font(11, bold=True),
+              fill=sess_color, anchor="mm")
+    draw.line([(0,29),(95,29)], fill=(30,35,50), width=1)
 
-    # ── SECTION 2: Local time (middle third y=96–192) ─────────────
-    draw.rectangle([(0, 96), (W-1, 191)], fill=(10, 12, 20))
-    draw.rectangle([(0, 96), (W-1, 191)], outline=(40, 50, 80), width=1)
-    draw.text((W//2, 112), "LOCAL TIME",
-              font=_font(9), fill=(80, 90, 110), anchor="mm")
-    draw.text((W//2, 142), local_now.strftime("%H:%M:%S"),
-              font=_font(18, bold=True), fill=(200, 210, 230), anchor="mm")
-    draw.text((W//2, 168), local_now.strftime("%a %d %b"),
-              font=_font(10), fill=(100, 110, 140), anchor="mm")
+    # Time band (middle)
+    draw.text((48, 46), local_now.strftime("%H:%M:%S"),
+              font=_font(14, bold=True), fill=(210, 220, 240), anchor="mm")
+    draw.text((48, 60), local_now.strftime("%d %b"),
+              font=_font(9), fill=(100, 110, 130), anchor="mm")
+    draw.line([(0,67),(95,67)], fill=(30,35,50), width=1)
 
-    # ── SECTION 3: P&L (bottom third y=192–288) ──────────────────
+    # P&L band (bottom)
     if connected:
-        pnl_color = (0, 210, 100) if profit >= 0 else (240, 30, 60)
-        bg_col    = (8, 12, 10)   if profit >= 0 else (12,  8,  8)
-        arrow     = "▲"           if profit >= 0 else "▼"
-        draw.rectangle([(0, 192), (W-1, 287)], fill=bg_col)
-        draw.rectangle([(0, 192), (W-1, 287)], outline=pnl_color, width=2)
-        draw.text((W//2, 210), "OPEN P&L",
-                  font=_font(9), fill=(80, 90, 80), anchor="mm")
-        draw.text((W//2, 238), f"{arrow} {abs(profit):.2f}",
-                  font=_font(16, bold=True), fill=pnl_color, anchor="mm")
-        draw.text((W//2, 262), currency,
-                  font=_font(10), fill=(80, 90, 80), anchor="mm")
-        draw.text((W//2, 278), "FLOATING",
-                  font=_font(8), fill=(50, 60, 50), anchor="mm")
+        pc  = (0, 210, 100) if profit >= 0 else (240, 30, 60)
+        sym = "▲" if profit >= 0 else "▼"
+        draw.text((48, 80), f"{sym} {profit:+.2f}",
+                  font=_font(12, bold=True), fill=pc, anchor="mm")
+        draw.text((48, 91), currency,
+                  font=_font(8), fill=(70,80,70), anchor="mm")
     else:
-        draw.rectangle([(0, 192), (W-1, 287)], fill=(12, 8, 8))
-        draw.rectangle([(0, 192), (W-1, 287)], outline=(80, 30, 30), width=2)
-        draw.text((W//2, 230), "MT5",     font=_font(14, bold=True), fill=(150, 50, 50), anchor="mm")
-        draw.text((W//2, 256), "OFFLINE", font=_font(11),            fill=(120, 40, 40), anchor="mm")
+        draw.text((48, 82), "MT5 OFF",
+                  font=_font(10), fill=(80,40,40), anchor="mm")
 
+    draw.rectangle([(0,0),(95,95)], outline=sess_color, width=2)
     return img
