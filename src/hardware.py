@@ -16,21 +16,32 @@ import os
 import sys
 import logging
 
-# ── Fix DLL search path on Windows before importing hid ──────────
+# ── Fix DLL search path on Windows ───────────────────────────────
 if sys.platform == 'win32':
-    import importlib.util
-    _spec = importlib.util.find_spec('hid')
-    if _spec:
-        _hid_dir = os.path.dirname(_spec.origin)
-        os.add_dll_directory(_hid_dir)
+    _dll_dirs = []
+
     if getattr(sys, 'frozen', False):
-        # Running as PyInstaller exe — also check exe folder
-        os.add_dll_directory(os.path.dirname(sys.executable))
+        # Running as PyInstaller exe — DLL is in the temp extract folder
+        if hasattr(sys, '_MEIPASS'):
+            _dll_dirs.append(sys._MEIPASS)
+        _dll_dirs.append(os.path.dirname(sys.executable))
+    else:
+        # Running as normal Python script
+        import importlib.util
+        _spec = importlib.util.find_spec('hid')
+        if _spec:
+            _dll_dirs.append(os.path.dirname(_spec.origin))
+
+    for _d in _dll_dirs:
+        if _d and os.path.isdir(_d):
+            try:
+                os.add_dll_directory(_d)
+            except Exception:
+                pass
 
 import hid
 from PIL import Image
 Logger = logging.getLogger("yp")
-
 # ── Known device profiles ──────────────────────────────────────────
 DEVICES = [
     # MiraBox StreamDock — same HID protocol as Stream Deck
