@@ -1,3 +1,4 @@
+import ctypes
 import threading
 import struct
 import io
@@ -7,12 +8,44 @@ from PIL import Image
 
 Logger = logging.getLogger("yp")
 
+# ── Windows API constants for direct HID write ────────────────────
+GENERIC_WRITE    = 0x40000000
+OPEN_EXISTING    = 3
+FILE_SHARE_READ  = 0x00000001
+FILE_SHARE_WRITE = 0x00000002
+
 DEVICES = [
     {"name": "StreamDock MiraBox", "vid": 0x6603, "pid": 0x1014, "keys": 15, "img_size": 72, "img_flip_h": True,  "img_flip_v": True,  "page_hdr": 8},
     {"name": "StreamDock",         "vid": 0x0fd9, "pid": 0x0063, "keys": 15, "img_size": 72, "img_flip_h": True,  "img_flip_v": True,  "page_hdr": 8},
     {"name": "StreamDeck v2",      "vid": 0x0fd9, "pid": 0x006d, "keys": 15, "img_size": 72, "img_flip_h": True,  "img_flip_v": True,  "page_hdr": 8},
     {"name": "StreamDeck v1",      "vid": 0x0fd9, "pid": 0x0060, "keys": 15, "img_size": 72, "img_flip_h": True,  "img_flip_v": True,  "page_hdr": 16},
 ]
+
+
+def _win_write(device_path, data):
+    """Write raw bytes directly to HID device using Windows API.
+    Bypasses pywinusb connection state checks entirely."""
+    k32    = ctypes.windll.kernel32
+    handle = k32.CreateFileW(
+        device_path,
+        GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        None,
+        OPEN_EXISTING,
+        0,
+        None
+    )
+    if handle == ctypes.c_void_p(-1).value or handle == 0:
+        Logger.error(f"CreateFile failed for {device_path}")
+        return False
+    try:
+        buf     = (ctypes.c_ubyte * len(data))(*data)
+        written = ctypes.c_ulong(0)
+        result  = k32.WriteFile(handle, buf, len(data),
+                                ctypes.byref(written), None)
+        return bool(result)
+    finally:
+        k32.CloseHandle(handle)
 
 
 def _encode_image(pil_image, size, flip_h, flip_v):
@@ -27,9 +60,9 @@ def _encode_image(pil_image, size, flip_h, flip_v):
 
 
 def _build_image_payload(key_index, img_data, page_hdr, data_size):
-    pages     = []
-    remaining = img_data
-    page_num  = 0
+    pages        = []
+    remaining    = img_data
+    page_num     = 0
     payload_size = data_size - page_hdr
     while remaining:
         chunk     = remaining[:payload_size]
@@ -56,13 +89,13 @@ class StreamDockDevice:
     def __init__(self, profile):
         self._profile     = profile
         self._device      = None
+        self._device_path = None
         self._lock        = threading.Lock()
         self._running     = False
         self._cb          = None
         self._prev        = [False] * profile["keys"]
-        self._report_size = 1025   # updated on open()
-        self._data_size   = 1024   # report_size - 1 (report ID byte)
-        self._report_id   = 0
+        self._report_size = 1025
+        self._data_size   = 1024
 
     @property
     def key_count(self):
@@ -80,23 +113,34 @@ class StreamDockDevice:
         devices = f.get_devices()
         if not devices:
             raise RuntimeError(f"Device not found: {self._profile['name']}")
-        self._device = devices[0]
+
+        # Log all interfaces found
+        Logger.info(f"HID interfaces found: {len(devices)}")
+        for i, d in enumerate(devices):
+            Logger.info(f"  Interface {i}: path={d.device_path}")
+
+        self._device      = devices[0]
+        self._device_path = self._device.device_path
+        Logger.info(f"Using path: {self._device_path}")
+
+        # Open for READING only (key press events)
         self._device.open()
         self._device.set_raw_data_handler(self._on_data)
         Logger.info(f"Connected to {self.name}")
 
-        # Auto-detect report size
+        # Detect report size via output report descriptor
         out_reports = self._device.find_output_reports()
-        Logger.info(f"Output reports: {len(out_reports)}")
         if out_reports:
             raw = out_reports[0].get_raw_data()
-            self._report_id   = raw[0]
             self._report_size = len(raw)
             self._data_size   = self._report_size - 1
-            Logger.info(f"Report ID={self._report_id} ReportSize={self._report_size} DataSize={self._data_size}")
+        Logger.info(f"ReportSize={self._report_size} DataSize={self._data_size}")
 
         self._running = True
-        # NOTE: No reset() call — wrong reset command disconnects MiraBox device
+        # Test write to verify path works
+        test = [0x00] + [0x00] * self._data_size
+        ok = _win_write(self._device_path, test[:self._report_size])
+        Logger.info(f"Test write result: {'OK' if ok else 'FAILED'}")
 
     def close(self):
         self._running = False
@@ -147,21 +191,16 @@ class StreamDockDevice:
             self.clear_key(i)
 
     def _write(self, data):
-        if not self._device:
+        if not self._device_path:
             return
         try:
-            out_reports = self._device.find_output_reports()
-            if not out_reports:
-                return
-            report  = out_reports[0]
-            rdata   = report.get_raw_data()
-            rid     = rdata[0]
-            rsize   = len(rdata)
-            payload = [rid] + list(data[:(rsize - 1)])
-            while len(payload) < rsize:
-                payload.append(0)
-            report.set_raw_data(payload)
-            report.send()
+            # Prepend report ID 0x00 then our data
+            full = [0x00] + list(data[:(self._report_size - 1)])
+            while len(full) < self._report_size:
+                full.append(0)
+            ok = _win_write(self._device_path, full)
+            if not ok:
+                Logger.error("Write failed (WinAPI)")
         except Exception as e:
             Logger.error(f"Write error: {e}")
 
